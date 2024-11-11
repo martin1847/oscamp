@@ -1,11 +1,13 @@
-#![no_std]
-#![no_main]
+#![cfg_attr(feature = "axstd", no_std)]
+#![cfg_attr(feature = "axstd", no_main)]
 
 #[macro_use]
 #[cfg(feature = "axstd")]
 extern crate axstd as std;
 
-use std::collections::HashMap;
+// use std::thread;
+// use std::collections::VecDeque;
+use std::collections::BTreeMap as HashMap;
 
 #[cfg_attr(feature = "axstd", no_mangle)]
 fn main() {

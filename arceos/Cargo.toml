@@ -2,6 +2,9 @@
 resolver = "2"
 
 members = [
+
+    "examples/helloworld",
+
     "modules/axalloc",
     "modules/axconfig",
     "modules/axdisplay",

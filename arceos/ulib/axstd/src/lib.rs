@@ -53,6 +53,14 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+// #[cfg(feature = "alloc")]
+// extern crate std;
+
+// #[cfg(feature = "alloc")]
+// #[doc(no_inline)]
+// pub use std::collections;
+
+
 #[cfg(feature = "alloc")]
 #[doc(no_inline)]
 pub use alloc::{boxed, collections, format, string, vec};
