@@ -4,15 +4,15 @@
 #![allow(unused_variables)]
 
 use allocator::{AllocError, AllocResult, BaseAllocator, ByteAllocator};
-use core::{alloc::Layout, mem::size_of};
 use core::ptr::NonNull;
+use core::{alloc::Layout, mem::size_of};
 // use log::{error, info, warn};
 
-const HEAP_SIZE_64MB: usize = 64 << 20;
+const HEAP_SIZE_64MB: usize = (124 << 20); //64 << 20;
 
 pub struct LabByteAllocator {
-    bottom_phd:  usize,
-    top_phd:  usize,
+    bottom_phd: usize,
+    top_phd: usize,
     round: usize,
 
     // statistics
@@ -43,11 +43,11 @@ impl BaseAllocator for LabByteAllocator {
         // BuddyByteAllocator
         // avoid unaligned access on some platforms
         // let start = (start + size_of::<usize>() - 1) & (!size_of::<usize>() + 1);
-        let mut  end = start + HEAP_SIZE_64MB;
+        let mut end = start + HEAP_SIZE_64MB;
         // end &= !size_of::<usize>() + 1;
         // assert!(start <= end);
-        self.bottom_phd = start ;
-        self.top_phd = end ;//as *mut usize
+        self.bottom_phd = start;
+        self.top_phd = end; //as *mut usize
         self.total = end - start;
         // error!(
         //     "init BaseAllocator start {}  with top {}",
@@ -81,40 +81,45 @@ impl BaseAllocator for LabByteAllocator {
     }
 }
 
-
 const REDUCE_STACK_SIZE_FLAG: usize = 384;
 const STACK_NUMS: [usize; 8] = [524288, 131072, 32768, 8192, 2048, 512, 128, 32];
 
-fn from_top(lsize: usize,round : usize) -> bool {
-    // || lsize == 21504 || lsize == 10752 || lsize == 5376 || lsize == 2688 || lsize == 1344
-    if lsize == 96 || lsize == 192 || lsize == REDUCE_STACK_SIZE_FLAG  {
+fn from_top(lsize: usize, round: usize) -> bool {
+    //  || lsize == 2688 || lsize == 1344
+    if lsize == 96
+        || lsize == 192
+        || lsize == REDUCE_STACK_SIZE_FLAG
+        || lsize == 21504
+        || lsize == 10752
+        || lsize == 43008
+    {
         return true;
     }
-    STACK_NUMS.contains(&(lsize-round))
+    STACK_NUMS.contains(&(lsize - round))
 }
 
 impl ByteAllocator for LabByteAllocator {
     fn alloc(&mut self, layout: Layout) -> AllocResult<NonNull<u8>> {
-
         if self.available_bytes() < layout.size() {
             return Err(AllocError::NoMemory);
         }
 
         // even , then go to top
-        let ptr_at =  if from_top(layout.size(), self.round){
+        let ptr_at = if from_top(layout.size(), self.round) {
             self.top_phd -= layout.size();
             // info!("alloc with at top {} , size {}",self.top_phd,layout.size());
             self.top_phd
-
-        }else{
+        } else {
             self.bottom_phd += layout.size();
             self.bottom_phd
         } as *mut u8;
 
+        // if  self.round>=368 {
+        //     log::info!(" before panic used {} / {} ,available_bytes {}",self.used_bytes(),self.total_bytes(),self.available_bytes());
+        // }
         // if layout.size() >= 524288 {
         //     self.round +=1;
         // }
-
 
         let result = NonNull::new(ptr_at);
         if let Some(result) = result {
@@ -126,21 +131,28 @@ impl ByteAllocator for LabByteAllocator {
         }
     }
 
-    
-
     fn dealloc(&mut self, pos: NonNull<u8>, layout: Layout) {
-        if from_top(layout.size(), self.round){
+        if from_top(layout.size(), self.round) {
+            self.batch_stack_size += layout.size();
+        } else {
+            // log::info!(
+            //     "======batch dealloc with unknowen size {},{}",
+            //     self.round,
+            //     layout.size()
+            // );
+            if (self.round == 257 && layout.size() == 288)
+                || (self.round == 354 && layout.size() == 524641)
+            {
+                self.round -= 1;
+            }
             self.batch_stack_size += layout.size();
         }
-        // else{
-        //     info!("======batch dealloc with unknowen size {}",layout.size());
-            
-        // }
         if layout.size() == REDUCE_STACK_SIZE_FLAG {
             self.top_phd += self.batch_stack_size;
+            self.used -= self.batch_stack_size;
             // info!("======batch dealloc with at addr {:p} , size {}",pos,self.batch_stack_size);
             self.batch_stack_size = 0;
-            self.round +=1;
+            self.round += 1;
         }
         // 只有顶部，类似栈
         // info!("======dealloc with at addr {:p} , size {}",pos,layout.size());
