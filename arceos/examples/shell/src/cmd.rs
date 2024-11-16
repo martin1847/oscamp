@@ -27,6 +27,8 @@ const CMD_TABLE: &[(&str, CmdHandler)] = &[
     ("pwd", do_pwd),
     ("rm", do_rm),
     ("uname", do_uname),
+    ("mv", do_mv),
+    ("rename", do_rename),
 ];
 
 fn file_type_to_char(ty: FileType) -> char {
@@ -290,4 +292,31 @@ fn split_whitespace(str: &str) -> (&str, &str) {
     let str = str.trim();
     str.find(char::is_whitespace)
         .map_or((str, ""), |n| (&str[..n], str[n + 1..].trim()))
+}
+
+
+fn do_mv(args: &str) {
+    let (src,dest) = split_whitespace(args);
+    if dest.is_empty() {
+        print_err!("mv", "missing operand, mv a b");
+        return;
+    }
+    let meta = fs::metadata(dest);
+    if ! meta.is_ok_and(|f|f.is_dir()) {
+        print_err!("mv", "dest must be dir!!");
+        return;
+    }
+    fs::write(&(String::from(dest)+"/"+src), fs::read(src).unwrap());
+    fs::remove_file(src);
+    // fs::rename(src, ));
+}
+
+
+fn do_rename(args: &str) {
+    let (src,dest) = split_whitespace(args);
+    if dest.is_empty() {
+        print_err!("rename", "missing operand, rename a b");
+        return;
+    }
+    fs::rename(src, dest);
 }
