@@ -8,7 +8,9 @@ use core::ptr::NonNull;
 use core::{alloc::Layout, mem::size_of};
 // use log::{error, info, warn};
 
-const HEAP_SIZE_64MB: usize = (124 << 20); //64 << 20;
+//const HEAP_SIZE_64MB: usize = (124 << 20); //64 << 20;
+const HEAP_SIZE_64MB: usize = (124 << 20) + (1<<19)+ (1<<18)+ (1<<17); //64 << 20;
+
 
 pub struct LabByteAllocator {
     bottom_phd: usize,
