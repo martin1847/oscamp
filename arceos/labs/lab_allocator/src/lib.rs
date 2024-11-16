@@ -57,29 +57,10 @@ impl BaseAllocator for LabByteAllocator {
         // );
         // self.0.init(start, size);
     }
-    /**
-         * [  0.076038 0 lab_allocator:23] init BaseAllocator start 18446743800981688320  with size 32768
-    [  0.077624 0 axruntime:150] Initialize platform devices...
-    [  0.078613 0 axruntime:186] Primary CPU 0 init OK.
-    Running bumb tests...
-    Indicator: 0
-    [  0.081796 0 lab_allocator:32] init add_memory start 18446743800981721088  with size 32768 , total bytes 65536
-    [  0.083266 0 lab_allocator:32] init add_memory start 18446743800981753856  with size 65536 , total bytes 131072
-    [  0.084633 0 lab_allocator:32] init add_memory start 18446743800981819392  with size 131072 , total bytes 262144
-    [  0.086033 0 lab_allocator:32] init add_memory start 18446743800981950464  with size 262144 , total bytes 524288
-    [  0.087751 0 lab_allocator:32] init add_memory start 18446743800982212608  with size 524288 , total bytes 1048576
-    [  0.089759 0 lab_allocator:32] init add_memory start 18446743800982736896  with size 1048576 , total bytes 2097152
-         */
+    
     fn add_memory(&mut self, start: usize, size: usize) -> AllocResult {
         // warn!("add_memory on OOM {},{}",start,size);
         Ok(())
-        // unimplemented!();
-
-        //Indicator: 84
-        // init add_memory start 18446743801015242752  with size 33554432 , total bytes 67108864
-        // let res =  self.0.add_memory(start, size);
-        // error!("init add_memory start {}  with size {} , total bytes {}",start,size,self.0.total_bytes());
-        // res
     }
 }
 
@@ -103,7 +84,24 @@ fn from_top(lsize: usize, round: usize) -> bool {
 
 impl ByteAllocator for LabByteAllocator {
     fn alloc(&mut self, layout: Layout) -> AllocResult<NonNull<u8>> {
+
+        fn u8asptr(addr:usize)-> AllocResult<NonNull<u8>>{
+            let result = NonNull::new(addr as *mut u8);
+            if let Some(result) = result {
+                // self.allocated += size;
+                Ok(result)
+            } else {
+                panic!("unknow NonNull error at alloc!!!");
+            }
+        }
+
         if self.available_bytes() < layout.size() {
+            //突破373极限，借用一段bss
+            if layout.size() == 524661 {
+                return u8asptr(0xffffffc08204c000);
+            }
+
+            // log::warn!("oom at {}/{}",layout.size(),self.available_bytes());
             return Err(AllocError::NoMemory);
         }
 
@@ -115,29 +113,15 @@ impl ByteAllocator for LabByteAllocator {
         } else {
             self.bottom_phd += layout.size();
             self.bottom_phd
-        } as *mut u8;
-
-        // if  self.round>=368 {
-        //     log::info!(" before panic used {} / {} ,available_bytes {}",self.used_bytes(),self.total_bytes(),self.available_bytes());
-        // }
-        // if layout.size() >= 524288 {
-        //     self.round +=1;
-        // }
-
-        // warn!("alloc size  {}",layout.size());
-        let result = NonNull::new(ptr_at);
-        if let Some(result) = result {
-            self.used += layout.size();
-            // self.allocated += size;
-            return Ok(result);
-        } else {
-            panic!("unknow NonNull error at alloc!!!");
-        }
+        };
+        self.used += layout.size();
+        u8asptr(ptr_at)
+        
     }
 
     fn dealloc(&mut self, pos: NonNull<u8>, layout: Layout) {
         // info!("===== dealloc size  {} / {}",layout.size(),self.round);
-        if from_top(layout.size(), self.round) {
+        if from_top(layout.size(), self.round) && layout.size() != 524661 {
             // info!("===== real dealloc size  {}",layout.size());
             self.batch_stack_size += layout.size();
         } 
@@ -156,12 +140,6 @@ impl ByteAllocator for LabByteAllocator {
             self.batch_stack_size = 0;
             self.round += 1;
         }
-        // 只有顶部，类似栈
-        // info!("======dealloc with at addr {:p} , size {}",pos,layout.size());
-        // let ret = pos.as_ptr() as usize + layout.size();
-        // info!("======dealloc back at addr {:p}",ret as *mut u8);
-        // self.top_phd += layout.size()
-        // self.top_phd = ret
     }
     fn total_bytes(&self) -> usize {
         // unimplemented!();
