@@ -47,6 +47,8 @@ members = [
     "exercises/print_with_color",
     "exercises/support_hashmap",
     "exercises/alt_alloc",
+
+    "examples/shell",
 ]
 
 [workspace.package]

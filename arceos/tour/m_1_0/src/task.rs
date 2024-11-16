@@ -32,7 +32,7 @@ pub fn spawn_user_task(aspace: Arc<Mutex<AddrSpace>>, uctx: UspaceContext) -> Ax
         || {
             let curr = axtask::current();
             let kstack_top = curr.kernel_stack_top().unwrap();
-            println!(
+            ax_println!(
                 "Enter user space: entry={:#x}, ustack={:#x}, kstack={:#x}",
                 curr.task_ext().uctx.get_ip(),
                 curr.task_ext().uctx.get_sp(),
