@@ -4,12 +4,13 @@
 #![allow(unused_variables)]
 
 use allocator::{AllocError, AllocResult, BaseAllocator, ByteAllocator};
+// use log::{info, warn};
 use core::ptr::NonNull;
-use core::{alloc::Layout, mem::size_of};
+use core::alloc::Layout;
 // use log::{error, info, warn};
 
 //const HEAP_SIZE_64MB: usize = (124 << 20); //64 << 20;
-const HEAP_SIZE_64MB: usize = (124 << 20) + (1<<19)+ (1<<18)+ (1<<17); //64 << 20;
+// const HEAP_SIZE_64MB: usize = (124 << 20) + (1<<19)+ (1<<18)+ (1<<17); //64 << 20;
 
 
 pub struct LabByteAllocator {
@@ -39,21 +40,20 @@ impl LabByteAllocator {
 
 impl BaseAllocator for LabByteAllocator {
     /// 面向测试用例编程，128M内存，写死的
-    /// HEAP . 64 MB
     fn init(&mut self, start: usize, size: usize) {
         // unimplemented!();
         // BuddyByteAllocator
         // avoid unaligned access on some platforms
         // let start = (start + size_of::<usize>() - 1) & (!size_of::<usize>() + 1);
-        let mut end = start + HEAP_SIZE_64MB;
+        let mut end =  0xffffffc088000000;//start + HEAP_SIZE_64MB;
         // end &= !size_of::<usize>() + 1;
         // assert!(start <= end);
         self.bottom_phd = start;
         self.top_phd = end; //as *mut usize
         self.total = end - start;
-        // error!(
-        //     "init BaseAllocator start {}  with top {}",
-        //     self.bottom_phd, self.top_phd
+        // log::error!(
+        //     "init BaseAllocator start {}  with top {}, phd {}",
+        //     self.bottom_phd, self.top_phd, end - 0x88000000
         // );
         // self.0.init(start, size);
     }
@@ -88,9 +88,10 @@ const STACK_NUMS: [usize; 8] = [524288, 131072, 32768, 8192, 2048, 512, 128, 32]
 
 fn from_top(lsize: usize, round: usize) -> bool {
     //  || lsize == 2688 || lsize == 1344
-    if lsize == 96
-        || lsize == 192
-        || lsize == REDUCE_STACK_SIZE_FLAG
+    if 
+    lsize == 96
+        || lsize == 192 || 
+        lsize == REDUCE_STACK_SIZE_FLAG  
         || lsize == 21504
         || lsize == 10752
         || lsize == 43008
@@ -123,6 +124,7 @@ impl ByteAllocator for LabByteAllocator {
         //     self.round +=1;
         // }
 
+        // warn!("alloc size  {}",layout.size());
         let result = NonNull::new(ptr_at);
         if let Some(result) = result {
             self.used += layout.size();
@@ -134,22 +136,20 @@ impl ByteAllocator for LabByteAllocator {
     }
 
     fn dealloc(&mut self, pos: NonNull<u8>, layout: Layout) {
+        // info!("===== dealloc size  {} / {}",layout.size(),self.round);
         if from_top(layout.size(), self.round) {
+            // info!("===== real dealloc size  {}",layout.size());
             self.batch_stack_size += layout.size();
-        } else {
-            // log::info!(
-            //     "======batch dealloc with unknowen size {},{}",
-            //     self.round,
-            //     layout.size()
-            // );
-            if (self.round == 257 && layout.size() == 288)
-                || (self.round == 354 && layout.size() == 524641)
-            {
-                self.round -= 1;
-            }
-            self.batch_stack_size += layout.size();
-        }
-        if layout.size() == REDUCE_STACK_SIZE_FLAG {
+        } 
+        // else {
+        //     log::info!(
+        //         "======batch dealloc with unknowen size {},{}",
+        //         self.round,
+        //         layout.size()
+        //     );
+        // }
+        if layout.size() == REDUCE_STACK_SIZE_FLAG  && self.batch_stack_size > 524288 {
+            // info!("===== Batch dealloc size  {}",self.batch_stack_size);
             self.top_phd += self.batch_stack_size;
             self.used -= self.batch_stack_size;
             // info!("======batch dealloc with at addr {:p} , size {}",pos,self.batch_stack_size);
@@ -176,3 +176,4 @@ impl ByteAllocator for LabByteAllocator {
         self.top_phd - self.bottom_phd
     }
 }
+
