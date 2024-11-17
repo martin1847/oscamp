@@ -67,14 +67,13 @@ const REDUCE_STACK_SIZE_FLAG: usize = 384;
 const STACK_NUMS: [usize; 8] = [524288, 131072, 32768, 8192, 2048, 512, 128, 32];
 
 fn from_top(lsize: usize, round: usize) -> bool {
-    //  || lsize == 2688 || lsize == 1344
-    if 
-    lsize == 96
-        || lsize == 192 || 
-        lsize == REDUCE_STACK_SIZE_FLAG  
-        || lsize == 10752
-        || lsize == 21504
-        || lsize == 43008
+    if ( 
+        // 局部vec增长用到的，跳过撞到奇数位<64/256>的情况，允许这个碎片，保证正确性 
+        (lsize == 96 || lsize == 192 || ( lsize == REDUCE_STACK_SIZE_FLAG && lsize - round != 256 ))
+        && lsize - round != 64 
+    )
+    // 全局 pool vec增长部分，这部分释放掉，可以达到373 ,没有跟奇数位相撞
+    || lsize == 43008 || lsize == 21504  // || lsize == 10752  || lsize == 5376 || lsize == 2688
     {
         return true;
     }
@@ -94,9 +93,7 @@ impl ByteAllocator for LabByteAllocator {
             }
         }
 
-        // if self.round == 373 {
-        //     info!("free size now after alloc {} / {}",layout.size() ,self.available_bytes())
-        // }
+     
 
         if self.available_bytes() < layout.size() {
             //突破373极限，借用一段bss,0x6f000 - 0x4c000 = 143k数据段不够用，貌似写了也会出问题
@@ -108,6 +105,9 @@ impl ByteAllocator for LabByteAllocator {
             return Err(AllocError::NoMemory);
         }
 
+        // if self.round == 320 {
+        //     log::info!("alloc size now after alloc {} / {}",layout.size() ,self.available_bytes());
+        // }
         // even , then go to top
         let ptr_at = if from_top(layout.size(), self.round) {
             self.top_phd -= layout.size();
