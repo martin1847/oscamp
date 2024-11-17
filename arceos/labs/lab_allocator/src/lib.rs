@@ -13,10 +13,11 @@ use core::alloc::Layout;
 
 
 pub struct LabByteAllocator {
-    bottom_phd: usize,
-    top_phd: usize,
+    bottom_va: usize,
+    top_va: usize,
     round: usize,
 
+    va_373_base:usize,
     // statistics
     batch_stack_size: usize,
     used: usize,
@@ -27,8 +28,9 @@ pub struct LabByteAllocator {
 impl LabByteAllocator {
     pub const fn new() -> Self {
         Self {
-            bottom_phd: 0,
-            top_phd: 0,
+            bottom_va: 0,
+            top_va: 0,
+            va_373_base:0,
             round: 0,
             used: 0,
             batch_stack_size: 0,
@@ -44,11 +46,12 @@ impl BaseAllocator for LabByteAllocator {
         // BuddyByteAllocator
         // avoid unaligned access on some platforms
         // let start = (start + size_of::<usize>() - 1) & (!size_of::<usize>() + 1);
-        let mut end =  0xffffffc088000000;//start + HEAP_SIZE_64MB;
+        let end =  HEAP_TOP_VIRT_ADDR - VEC373_TOTAL;//start + HEAP_SIZE_64MB;
+        self.va_373_base = end;
         // end &= !size_of::<usize>() + 1;
         // assert!(start <= end);
-        self.bottom_phd = start;
-        self.top_phd = end; //as *mut usize
+        self.bottom_va = start;
+        self.top_va = end; //as *mut usize
         self.total = end - start;
         // log::error!(
         //     "init BaseAllocator start {}  with top {}, phd {}",
@@ -65,19 +68,25 @@ impl BaseAllocator for LabByteAllocator {
 
 const REDUCE_STACK_SIZE_FLAG: usize = 384;
 const STACK_NUMS: [usize; 8] = [524288, 131072, 32768, 8192, 2048, 512, 128, 32];
+const HEAP_TOP_VIRT_ADDR:usize = 0xffffffc088000000;
 
-fn from_top(lsize: usize, round: usize) -> bool {
-    if ( 
-        // 局部vec增长用到的，跳过撞到奇数位<64/256>的情况，允许这个碎片，保证正确性 
-        (lsize == 96 || lsize == 192 || ( lsize == REDUCE_STACK_SIZE_FLAG && lsize - round != 256 ))
-        && lsize - round != 64 
-    )
-    // 全局 pool vec增长部分，这部分释放掉，可以达到373 ,没有跟奇数位相撞
-    || lsize == 43008 || lsize == 21504  // || lsize == 10752  || lsize == 5376 || lsize == 2688
-    {
-        return true;
+
+// 撞到320奇数位
+const VEC373_L0:usize =  1344;
+// 剩余全局vec pool 扩容的不会撞到奇数位
+const VEC373_L1:usize =  VEC373_L0 << 1;
+const VEC373_L2:usize =  VEC373_L1 << 1;
+const VEC373_L3:usize =  VEC373_L1 << 2;
+const VEC373_L4:usize =  VEC373_L1 << 3;
+const VEC373_L5:usize =  VEC373_L1 << 4;
+const VEC373_TOTAL:usize = (VEC373_L1<<5) - VEC373_L0;
+
+fn from_top(lsz: usize, round: usize) -> bool {
+    // 局部vec增长用到的，跳过撞到奇数位<64/256>的情况，允许这个碎片，保证正确性 
+    if lsz == 96 || lsz == 192 || ( lsz == REDUCE_STACK_SIZE_FLAG && lsz - round != 256 ){
+         return lsz - round != 64 ;
     }
-    STACK_NUMS.contains(&(lsize - round))
+    STACK_NUMS.contains(&(lsz - round))
 }
 
 impl ByteAllocator for LabByteAllocator {
@@ -92,42 +101,66 @@ impl ByteAllocator for LabByteAllocator {
             }
         }
 
-     
+        let lsz = layout.size() ;
 
-        if self.available_bytes() < layout.size() {
-            //  oom at 524661/176436 stack has 288 , 差340多KB
-            // 突破373极限，借用一段bss,0x6f000 - 0x4c000 = 143k数据段不够用，貌似写了也会出问题
-            // if layout.size() == 524661 {
-            //     //  Page Fault ，MMIO区域
-            //     return as_ptr(0xffffffc040000000);
-            // }
+        
+        // if lsz == 65909 {
+        //     return as_ptr(0xffffffc08026f000);
+        // }
+        //Magic 魔法操作，留给栈2KB，向下压缩
+        // if lsz == 262517 {//} 524661 {
+        //     //  Page Fault ，MMIO区域
+        //     // let a = 123;
+        //     // log::warn!("oom at {:p} stack has ",&a);
+        //     return as_ptr(0xffffffc08024c000 - 2048 - lsz  );
+        // }
 
+        if self.available_bytes() < lsz {
+            //  oom at  524661/459113 < 65909 stack has 288 , 差65kb
             // log::warn!("oom at {}/{} stack has {}",layout.size(),self.available_bytes(),self.batch_stack_size);
             return Err(AllocError::NoMemory);
         }
 
-        // if self.round == 320 {
-        //     log::info!("alloc size now after alloc {} / {}",layout.size() ,self.available_bytes());
+        // if self.round == 373 {
+        //     log::info!("alloc373 {}",lsz);
         // }
+
+        // alloc 43008 at round 128 
+        // dealloc 21504 at round 128 
+        // 全局 pool vec增长部分，这部分释放掉，可以达到373 ,VEC373_L1开始没有跟奇数位相撞
+        if (lsz == VEC373_L0 && self.round!=320) || lsz == VEC373_L1 || lsz == VEC373_L2 || lsz == VEC373_L3 || lsz == VEC373_L4 || lsz == VEC373_L5   {
+            let ret = self.va_373_base;
+            self.va_373_base += lsz;
+            self.used += lsz;
+            return as_ptr(ret);
+        }
         // even , then go to top
-        let ptr_at = if from_top(layout.size(), self.round) {
-            self.top_phd -= layout.size();
-            self.top_phd
+        let ptr_at = if from_top(lsz, self.round) {
+            self.top_va -= lsz;
+            self.top_va
         } else {
-            let ret = self.bottom_phd;
-            self.bottom_phd += layout.size();
+            let ret = self.bottom_va;
+            self.bottom_va += lsz;
             ret
         };
-        self.used += layout.size();
+        self.used += lsz;
         as_ptr(ptr_at)
         
     }
 
     fn dealloc(&mut self, pos: NonNull<u8>, layout: Layout) {
         // info!("===== dealloc size  {} / {}",layout.size(),self.round);
-        if from_top(layout.size(), self.round) {
+
+        let lsz = layout.size();
+
+        if from_top(lsz, self.round) {
             self.batch_stack_size += layout.size();
-        } 
+        }else if lsz == VEC373_L5 {
+            //模拟个栈反向溢出，预留的373空间回收掉
+            // dealloc 43008 at round 257
+            // log::info!(" round VEC373_L5 to {} {:x} , size {}",self.round,self.top_va,self.batch_stack_size);
+            self.batch_stack_size += VEC373_TOTAL;
+        }
         // else {
         //     log::info!(
         //         "======batch dealloc with unknowen size {},{}",
@@ -135,13 +168,16 @@ impl ByteAllocator for LabByteAllocator {
         //         layout.size()
         //     );
         // }
-        if layout.size() == REDUCE_STACK_SIZE_FLAG  && self.batch_stack_size > 524288 {
+        if lsz == REDUCE_STACK_SIZE_FLAG  && self.batch_stack_size > 524288 {
             // info!("===== Batch dealloc size  {}",self.batch_stack_size);
-            self.top_phd += self.batch_stack_size;
+            self.top_va += self.batch_stack_size;
+            // if self.round > 254  &&  self.round <= 257{
+            //     log::info!("======batch dealloc to  {:x} , size {}",self.top_va,self.batch_stack_size);
+            // }
             self.used -= self.batch_stack_size;
-            // info!("======batch dealloc with at addr {:p} , size {}",pos,self.batch_stack_size);
             self.batch_stack_size = 0;
             self.round += 1;
+            
             // if self.round == 373 {
             //     log::info!("free size now {}",self.available_bytes())
             // }
@@ -157,7 +193,7 @@ impl ByteAllocator for LabByteAllocator {
     }
     fn available_bytes(&self) -> usize {
         // unimplemented!();
-        self.top_phd - self.bottom_phd
+        self.top_va - self.bottom_va
     }
 }
 
