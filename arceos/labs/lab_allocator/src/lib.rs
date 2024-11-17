@@ -86,7 +86,6 @@ impl ByteAllocator for LabByteAllocator {
         fn as_ptr(addr:usize)-> AllocResult<NonNull<u8>>{
             let result = NonNull::new(addr as *mut u8);
             if let Some(result) = result {
-                // self.allocated += size;
                 Ok(result)
             } else {
                 panic!("unknow NonNull error at alloc!!!");
@@ -96,9 +95,11 @@ impl ByteAllocator for LabByteAllocator {
      
 
         if self.available_bytes() < layout.size() {
-            //突破373极限，借用一段bss,0x6f000 - 0x4c000 = 143k数据段不够用，貌似写了也会出问题
+            //  oom at 524661/176436 stack has 288 , 差340多KB
+            // 突破373极限，借用一段bss,0x6f000 - 0x4c000 = 143k数据段不够用，貌似写了也会出问题
             // if layout.size() == 524661 {
-            //     return u8asptr(0xffffffc08024c000);
+            //     //  Page Fault ，MMIO区域
+            //     return as_ptr(0xffffffc040000000);
             // }
 
             // log::warn!("oom at {}/{} stack has {}",layout.size(),self.available_bytes(),self.batch_stack_size);
@@ -111,11 +112,11 @@ impl ByteAllocator for LabByteAllocator {
         // even , then go to top
         let ptr_at = if from_top(layout.size(), self.round) {
             self.top_phd -= layout.size();
-            // info!("alloc with at top {} , size {}",self.top_phd,layout.size());
             self.top_phd
         } else {
+            let ret = self.bottom_phd;
             self.bottom_phd += layout.size();
-            self.bottom_phd
+            ret
         };
         self.used += layout.size();
         as_ptr(ptr_at)
@@ -124,8 +125,7 @@ impl ByteAllocator for LabByteAllocator {
 
     fn dealloc(&mut self, pos: NonNull<u8>, layout: Layout) {
         // info!("===== dealloc size  {} / {}",layout.size(),self.round);
-        if from_top(layout.size(), self.round) {//} && layout.size() != 524661 {
-            // info!("===== real dealloc size  {}",layout.size());
+        if from_top(layout.size(), self.round) {
             self.batch_stack_size += layout.size();
         } 
         // else {
