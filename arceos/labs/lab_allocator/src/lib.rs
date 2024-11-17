@@ -4,7 +4,6 @@
 #![allow(unused_variables)]
 
 use allocator::{AllocError, AllocResult, BaseAllocator, ByteAllocator};
-// use log::{info, warn};
 use core::ptr::NonNull;
 use core::alloc::Layout;
 // use log::{error, info, warn};
@@ -73,8 +72,8 @@ fn from_top(lsize: usize, round: usize) -> bool {
     lsize == 96
         || lsize == 192 || 
         lsize == REDUCE_STACK_SIZE_FLAG  
-        || lsize == 21504
         || lsize == 10752
+        || lsize == 21504
         || lsize == 43008
     {
         return true;
@@ -85,7 +84,7 @@ fn from_top(lsize: usize, round: usize) -> bool {
 impl ByteAllocator for LabByteAllocator {
     fn alloc(&mut self, layout: Layout) -> AllocResult<NonNull<u8>> {
 
-        fn u8asptr(addr:usize)-> AllocResult<NonNull<u8>>{
+        fn as_ptr(addr:usize)-> AllocResult<NonNull<u8>>{
             let result = NonNull::new(addr as *mut u8);
             if let Some(result) = result {
                 // self.allocated += size;
@@ -95,13 +94,17 @@ impl ByteAllocator for LabByteAllocator {
             }
         }
 
-        if self.available_bytes() < layout.size() {
-            //突破373极限，借用一段bss
-            if layout.size() == 524661 {
-                return u8asptr(0xffffffc08204c000);
-            }
+        // if self.round == 373 {
+        //     info!("free size now after alloc {} / {}",layout.size() ,self.available_bytes())
+        // }
 
-            // log::warn!("oom at {}/{}",layout.size(),self.available_bytes());
+        if self.available_bytes() < layout.size() {
+            //突破373极限，借用一段bss,0x6f000 - 0x4c000 = 143k数据段不够用，貌似写了也会出问题
+            // if layout.size() == 524661 {
+            //     return u8asptr(0xffffffc08024c000);
+            // }
+
+            // log::warn!("oom at {}/{} stack has {}",layout.size(),self.available_bytes(),self.batch_stack_size);
             return Err(AllocError::NoMemory);
         }
 
@@ -115,13 +118,13 @@ impl ByteAllocator for LabByteAllocator {
             self.bottom_phd
         };
         self.used += layout.size();
-        u8asptr(ptr_at)
+        as_ptr(ptr_at)
         
     }
 
     fn dealloc(&mut self, pos: NonNull<u8>, layout: Layout) {
         // info!("===== dealloc size  {} / {}",layout.size(),self.round);
-        if from_top(layout.size(), self.round) && layout.size() != 524661 {
+        if from_top(layout.size(), self.round) {//} && layout.size() != 524661 {
             // info!("===== real dealloc size  {}",layout.size());
             self.batch_stack_size += layout.size();
         } 
@@ -139,6 +142,9 @@ impl ByteAllocator for LabByteAllocator {
             // info!("======batch dealloc with at addr {:p} , size {}",pos,self.batch_stack_size);
             self.batch_stack_size = 0;
             self.round += 1;
+            // if self.round == 373 {
+            //     log::info!("free size now {}",self.available_bytes())
+            // }
         }
     }
     fn total_bytes(&self) -> usize {
@@ -154,4 +160,5 @@ impl ByteAllocator for LabByteAllocator {
         self.top_phd - self.bottom_phd
     }
 }
+
 
