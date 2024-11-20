@@ -21,3 +21,11 @@ members = [
 ```bash
 make ARCH=riscv64 A=examples/helloworld run
 ```
+
+## 支持宏内核用户程序
+
+```bash
+make clean
+make
+make payload
+```
