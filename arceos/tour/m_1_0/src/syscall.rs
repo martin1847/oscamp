@@ -11,7 +11,7 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
     ax_println!("handle_syscall ...");
     let ret = match syscall_num {
         SYS_EXIT => {
-            ax_println!("[SYS_EXIT]: system is exiting ..");
+            ax_println!("[SYS_EXIT]: process is exiting ..");
             axtask::exit(tf.arg0() as _)
         },
         _ => {

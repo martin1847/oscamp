@@ -1,5 +1,5 @@
 [package]
-name = "m_2_0"
+name = "m_3_0"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,5 +10,8 @@ axhal = { workspace = true, features = ["uspace"] }
 axsync = { workspace = true }
 axtask = { workspace = true }
 axlog = { workspace = true }
+elf = { workspace = true }
 axerrno = "0.1"
 linkme = "0.3"
+kernel-elf-parser = "0.1.0"
+arceos_posix_api = { workspace = true }

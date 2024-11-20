@@ -31,7 +31,7 @@ fn main() {
     let mut uspace = axmm::new_user_aspace().unwrap();
 
     // Load user app binary file into address space.
-    if let Err(e) = load_user_app("/sbin/origin.bin", &mut uspace) {
+    if let Err(e) = load_user_app("/sbin/origin", &mut uspace) {
         panic!("Cannot load app! {:?}", e);
     }
 
