@@ -1,4 +1,4 @@
-SUB_DIRS=origin hello_c fileops_c
+SUB_DIRS=origin hello_c fileops_c mapfile_c
 
 all: $(SUB_DIRS)
 
