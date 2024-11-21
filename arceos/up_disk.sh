@@ -1,7 +1,7 @@
 #!/bin/sh
 
 if [ $# -ne 1 ]; then
-    printf "Usage: ./update.sh [userapp path]\n"
+    printf "Usage: ./up_disk.sh [userapp bin path]\n"
     exit
 fi
 
