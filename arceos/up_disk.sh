@@ -18,6 +18,7 @@ if [ ! -f ./disk.img ]; then
     # exit
 fi
 
-printf "Try Use Docker to Write file '$FILE' into disk.img\n"
+printf "Try Use Docker to Add file '$FILE' into disk.img\n"
 
+# https://stackoverflow.com/questions/52348221/can-i-use-mount-inside-a-docker-alpine-container
 docker run  --privileged --platform linux/riscv64  --rm -it  -v `pwd`:/tmp -w /tmp  myrisc/alpine:3 ./update_disk.sh $FILE
