@@ -2,12 +2,14 @@
 
 use core::ffi::{c_void, c_char, c_int};
 use axhal::arch::TrapFrame;
+use axhal::mem::virt_to_phys;
 use axhal::trap::{register_trap_handler, SYSCALL};
 use axerrno::LinuxError;
 use axtask::current;
 use axtask::TaskExtRef;
 use axhal::paging::MappingFlags;
-use arceos_posix_api as api;
+use arceos_posix_api::{self as api, get_file_like};
+use memory_addr::{MemoryAddr, VirtAddr, PAGE_SIZE_4K};
 
 const SYS_IOCTL: usize = 29;
 const SYS_OPENAT: usize = 56;
@@ -133,14 +135,60 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
 
 #[allow(unused_variables)]
 fn sys_mmap(
-    addr: *mut usize,
-    length: usize,
-    prot: i32,
+    // NULL in c
+    _addr: *mut usize,
+    len: usize,
+    port: i32,
     flags: i32,
     fd: i32,
     _offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+    // unimplemented!("no sys_mmap!");
+    if len == 0 {
+        warn!("kernel: len  == 0 !");
+        return -1;
+    }
+    if port & !0x7 != 0 {
+        warn!("kernel: port mask must be 0 {}!", port);
+        return -1;
+    }
+    if port & 0x7 == 0 {
+        warn!("kernel: port not vaild , R = 0 : {}!", port);
+        return -1;
+    }
+    // if start & (PAGE_SIZE - 1) != 0 {
+    //     warn!("kernel: start not aligend!  {}!", start);
+    //     return -1;
+    // }
+    let task = axtask::current();
+    let mut uspace =  task.task_ext()
+        .aspace.lock();
+    warn!("find_free_area AddrRange size:{}, {:?}",len,uspace);
+    //对齐逻辑一样，借用一下
+    let size = memory_addr::align_up(len ,PAGE_SIZE_4K);
+    let addr_src =  uspace.find_free_area(uspace.base(), size , 
+    memory_addr::AddrRange::new(uspace.base(),uspace.end())).unwrap();
+    
+    warn!("addr_src  addr_src size {}. {:?} ",size,addr_src);
+    let addr_at = addr_src.align_up_4k() + 0x19000 + 0x19000;
+    warn!("map_alloc  align {:?} -> {:?}",addr_src,addr_at);
+    // len also need 4k align
+    if uspace.map_alloc(addr_at, size, MappingFlags::from(MmapProt::from_bits_truncate(port)), true).is_err() {
+        warn!("map_alloc error !!!! when sys_mmap!!! ");
+        return 0;
+    }
+    let mut buf= alloc::vec![0; len];
+    get_file_like(fd).and_then(|f|f.read(&mut buf));
+    // sys_read(fd, &mut buf as *mut _ as *mut c_void, 5);
+    // warn!("current buf {:?}",buf);
+    uspace.write(addr_at, &buf);
+
+    // warn!("map_alloc ok  buf {:?} -> ph {:?} ",addr_at,ph);
+    //todo 这里检查文件大小
+    addr_at.as_usize() as isize// *mut c_void
+    // sys_read(fd, buf, len);
+    // warn!("map_alloc ok  buf {:p}!! ",buf);
+    // buf as isize
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
@@ -174,3 +222,4 @@ fn sys_ioctl(_fd: i32, _op: usize, _argp: *mut c_void) -> i32 {
     ax_println!("Ignore SYS_IOCTL");
     0
 }
+
