@@ -1,14 +1,14 @@
 #![allow(dead_code)]
 
-use core::ffi::{c_void, c_char, c_int};
+use arceos_posix_api::{self as api, get_file_like};
+use axerrno::LinuxError;
 use axhal::arch::TrapFrame;
 use axhal::mem::virt_to_phys;
+use axhal::paging::MappingFlags;
 use axhal::trap::{register_trap_handler, SYSCALL};
-use axerrno::LinuxError;
 use axtask::current;
 use axtask::TaskExtRef;
-use axhal::paging::MappingFlags;
-use arceos_posix_api::{self as api, get_file_like};
+use core::ffi::{c_char, c_int, c_void};
 use memory_addr::{MemoryAddr, VirtAddr, PAGE_SIZE_4K};
 
 const SYS_IOCTL: usize = 29;
@@ -102,9 +102,14 @@ bitflags::bitflags! {
 fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
     ax_println!("handle_syscall [{}] ...", syscall_num);
     let ret = match syscall_num {
-         SYS_IOCTL => sys_ioctl(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _) as _,
+        SYS_IOCTL => sys_ioctl(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _) as _,
         SYS_SET_TID_ADDRESS => sys_set_tid_address(tf.arg0() as _),
-        SYS_OPENAT => sys_openat(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _, tf.arg3() as _),
+        SYS_OPENAT => sys_openat(
+            tf.arg0() as _,
+            tf.arg1() as _,
+            tf.arg2() as _,
+            tf.arg3() as _,
+        ),
         SYS_CLOSE => sys_close(tf.arg0() as _),
         SYS_READ => sys_read(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _),
         SYS_WRITE => sys_write(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _),
@@ -112,11 +117,11 @@ fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
         SYS_EXIT_GROUP => {
             ax_println!("[SYS_EXIT_GROUP]: system is exiting ..");
             axtask::exit(tf.arg0() as _)
-        },
+        }
         SYS_EXIT => {
             ax_println!("[SYS_EXIT]: system is exiting ..");
             axtask::exit(tf.arg0() as _)
-        },
+        }
         SYS_MMAP => sys_mmap(
             tf.arg0() as _,
             tf.arg1() as _,
@@ -161,31 +166,65 @@ fn sys_mmap(
     //     return -1;
     // }
     let task = axtask::current();
-    let mut uspace =  task.task_ext()
-        .aspace.lock();
-    warn!("find_free_area AddrRange size:{}, {:?}",len,uspace);
-    //对齐逻辑一样，借用一下
-    let size = memory_addr::align_up(len ,PAGE_SIZE_4K);
-    let addr_src =  uspace.find_free_area(uspace.base(), size , 
-    memory_addr::AddrRange::new(uspace.base(),uspace.end())).unwrap();
-    
-    warn!("addr_src  addr_src size {}. {:?} ",size,addr_src);
-    let addr_at = addr_src.align_up_4k() + 0x19000 + 0x19000;
-    warn!("map_alloc  align {:?} -> {:?}",addr_src,addr_at);
+    let mut uspace = task.task_ext().aspace.lock();
+    // warn!("find_free_area AddrRange size:{}, {:?}", len, uspace);
+    // cat /proc/sys/vm/mmap_min_addr
+    // 4096 DEFAULT_MMAP_MIN_ADDR
+    // https://elixir.bootlin.com/linux/v6.12.1/source/mm/Kconfig#L743
+
+    let mmap_min_addr = 4096.into(); // (uspace.end() - uspace.size() / 3).align_up_4k();
+                                     // 对齐逻辑一样，借用一下
+    let addr_src = uspace
+        .find_free_area(
+            mmap_min_addr,
+            len,
+            memory_addr::AddrRange::new(uspace.base(), uspace.end()),
+        )
+        .unwrap();
+
+    warn!(
+        "uspace ip -> 0x{:x}  sp -> 0x{:x} , mmap_min_addr -> {:?}",
+        task.task_ext().uctx.get_ip(),
+        task.task_ext().uctx.get_sp(),
+        mmap_min_addr
+    );
+
+    let addr_at = addr_src.align_up_4k();
+    warn!(
+        "addr_src  {:?} -> algin  {:?} uspace PA  {:?} -> {:?} ",
+        addr_src,
+        addr_at,
+        virt_to_phys(uspace.base()),
+        virt_to_phys(uspace.end())
+    );
+    // warn!("map_alloc  align {:?} -> {:?}", addr_src, addr_at);
     // len also need 4k align
-    if uspace.map_alloc(addr_at, size, MappingFlags::from(MmapProt::from_bits_truncate(port)), true).is_err() {
+    if uspace
+        .map_alloc(
+            addr_at,
+            memory_addr::align_up(len, PAGE_SIZE_4K),
+            MappingFlags::from(MmapProt::from_bits_truncate(port)),
+            true,
+        )
+        .is_err()
+    {
         warn!("map_alloc error !!!! when sys_mmap!!! ");
         return 0;
     }
-    let mut buf= alloc::vec![0; len];
-    get_file_like(fd).and_then(|f|f.read(&mut buf));
+    let mut buf = alloc::vec![0; len];
+    get_file_like(fd).and_then(|f| f.read(&mut buf));
+    uspace.write(addr_at, &buf);
+    addr_at.as_usize() as isize
+    // get_file_like(fd).and_then(|f| {
+    //     f.read(unsafe { alloc::slice::from_raw_parts_mut(addr_at.as_mut_ptr(), len) })
+    // });
     // sys_read(fd, &mut buf as *mut _ as *mut c_void, 5);
     // warn!("current buf {:?}",buf);
-    uspace.write(addr_at, &buf);
+    // uspace.write(addr_at, &buf);
 
     // warn!("map_alloc ok  buf {:?} -> ph {:?} ",addr_at,ph);
     //todo 这里检查文件大小
-    addr_at.as_usize() as isize// *mut c_void
+    // addr_at.as_usize() as isize // *mut c_void
     // sys_read(fd, buf, len);
     // warn!("map_alloc ok  buf {:p}!! ",buf);
     // buf as isize
@@ -222,4 +261,3 @@ fn sys_ioctl(_fd: i32, _op: usize, _argp: *mut c_void) -> i32 {
     ax_println!("Ignore SYS_IOCTL");
     0
 }
-
