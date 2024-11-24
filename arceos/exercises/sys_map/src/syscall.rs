@@ -3,7 +3,7 @@
 use arceos_posix_api::{self as api, get_file_like};
 use axerrno::LinuxError;
 use axhal::arch::TrapFrame;
-use axhal::mem::virt_to_phys;
+use axhal::mem::{phys_to_virt, virt_to_phys};
 use axhal::paging::MappingFlags;
 use axhal::trap::{register_trap_handler, SYSCALL};
 use axtask::current;
@@ -172,12 +172,14 @@ fn sys_mmap(
     // 4096 DEFAULT_MMAP_MIN_ADDR
     // https://elixir.bootlin.com/linux/v6.12.1/source/mm/Kconfig#L743
 
-    let mmap_min_addr = 4096.into(); // (uspace.end() - uspace.size() / 3).align_up_4k();
-                                     // 对齐逻辑一样，借用一下
+    // https://github.com/torvalds/linux/blob/master/mm/mmap.c#L726
+    // let mmap_min_addr = 4096.into();
+    let mmap_min_addr = (uspace.end() - uspace.size() / 3).align_up_4k();
+    let size_align = memory_addr::align_up(len, PAGE_SIZE_4K);
     let addr_src = uspace
         .find_free_area(
             mmap_min_addr,
-            len,
+            size_align,
             memory_addr::AddrRange::new(uspace.base(), uspace.end()),
         )
         .unwrap();
@@ -202,7 +204,7 @@ fn sys_mmap(
     if uspace
         .map_alloc(
             addr_at,
-            memory_addr::align_up(len, PAGE_SIZE_4K),
+            size_align,
             MappingFlags::from(MmapProt::from_bits_truncate(port)),
             true,
         )
@@ -211,23 +213,26 @@ fn sys_mmap(
         warn!("map_alloc error !!!! when sys_mmap!!! ");
         return 0;
     }
-    let mut buf = alloc::vec![0; len];
-    get_file_like(fd).and_then(|f| f.read(&mut buf));
-    uspace.write(addr_at, &buf);
-    addr_at.as_usize() as isize
-    // get_file_like(fd).and_then(|f| {
-    //     f.read(unsafe { alloc::slice::from_raw_parts_mut(addr_at.as_mut_ptr(), len) })
-    // });
-    // sys_read(fd, &mut buf as *mut _ as *mut c_void, 5);
-    // warn!("current buf {:?}",buf);
-    // uspace.write(addr_at, &buf);
 
-    // warn!("map_alloc ok  buf {:?} -> ph {:?} ",addr_at,ph);
-    //todo 这里检查文件大小
-    // addr_at.as_usize() as isize // *mut c_void
-    // sys_read(fd, buf, len);
-    // warn!("map_alloc ok  buf {:p}!! ",buf);
-    // buf as isize
+    if size_align > PAGE_SIZE_4K {
+        let mut buf = alloc::vec![0; len];
+        // for each page to write with offset.
+        get_file_like(fd).and_then(|f| f.read(&mut buf));
+        uspace.write(addr_at, &buf);
+    } else {
+        let (paddr, _, _) = uspace.page_table().query(addr_at).unwrap();
+        let kernel_vaddr = phys_to_virt(paddr);
+        warn!(
+            "[ write single page directly ] user vaddr {:?} -> paddr : {:?} -> kernel vaddr {:?}",
+            addr_at, paddr, kernel_vaddr
+        );
+        // single page, write directly
+        get_file_like(fd).and_then(|f| {
+            f.read(unsafe { alloc::slice::from_raw_parts_mut(kernel_vaddr.as_mut_ptr(), len) })
+        });
+    }
+
+    addr_at.as_usize() as isize
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
