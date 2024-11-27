@@ -1,4 +1,4 @@
-TARGET := origin
+TARGET := skernel
 TARGET_ELF := ../../target/riscv64gc-unknown-none-elf/release/$(TARGET)
 
 all: $(TARGET) FORCE

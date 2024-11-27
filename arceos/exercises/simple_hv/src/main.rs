@@ -17,7 +17,7 @@ mod sbi;
 mod loader;
 
 use vcpu::VmCpuRegisters;
-use riscv::register::{scause, sstatus};
+use riscv::register::{scause, sstatus, stval};
 use csrs::defs::hstatus;
 use tock_registers::LocalRegisterCopy;
 use csrs::{RiscvCsrTrait, CSR};
@@ -25,6 +25,7 @@ use vcpu::_run_guest;
 use sbi::SbiMessage;
 use loader::load_vm_image;
 use axhal::mem::PhysAddr;
+use crate::regs::GprIndex::{A0, A1};
 
 const VM_ENTRY: usize = 0x8020_0000;
 
@@ -36,7 +37,7 @@ fn main() {
     let mut uspace = axmm::new_user_aspace().unwrap();
 
     // Load vm binary file into address space.
-    if let Err(e) = load_vm_image("/sbin/skernel", &mut uspace) {
+    if let Err(e) = load_vm_image("/sbin/skernel2", &mut uspace) {
         panic!("Cannot load app! {:?}", e);
     }
 
@@ -49,7 +50,8 @@ fn main() {
     prepare_vm_pgtable(ept_root);
 
     // Kick off vm and wait for it to exit.
-    run_guest(&mut ctx);
+    while !run_guest(&mut ctx) {
+    }
 
     panic!("Hypervisor ok!");
 }
@@ -65,7 +67,7 @@ fn prepare_vm_pgtable(ept_root: PhysAddr) {
     }
 }
 
-fn run_guest(ctx: &mut VmCpuRegisters) {
+fn run_guest(ctx: &mut VmCpuRegisters) -> bool {
     unsafe {
         _run_guest(ctx);
     }
@@ -73,7 +75,8 @@ fn run_guest(ctx: &mut VmCpuRegisters) {
     vmexit_handler(ctx)
 }
 
-fn vmexit_handler(ctx: &VmCpuRegisters) {
+#[allow(unreachable_code)]
+fn vmexit_handler(ctx: &mut VmCpuRegisters) -> bool {
     use scause::{Exception, Trap};
 
     let scause = scause::read();
@@ -84,7 +87,13 @@ fn vmexit_handler(ctx: &VmCpuRegisters) {
             if let Some(msg) = sbi_msg {
                 match msg {
                     SbiMessage::Reset(_) => {
+                        let a0 = ctx.guest_regs.gprs.reg(A0);
+                        let a1 = ctx.guest_regs.gprs.reg(A1);
+                        ax_println!("a0 = {:#x}, a1 = {:#x}", a0, a1);
+                        assert_eq!(a0, 0x6688);
+                        assert_eq!(a1, 0x1234);
                         ax_println!("Shutdown vm normally!");
+                        return true;
                     },
                     _ => todo!(),
                 }
@@ -92,15 +101,28 @@ fn vmexit_handler(ctx: &VmCpuRegisters) {
                 panic!("bad sbi message! ");
             }
         },
+        Trap::Exception(Exception::IllegalInstruction) => {
+            panic!("Bad instruction: {:#x} sepc: {:#x}",
+                stval::read(),
+                ctx.guest_regs.sepc
+            );
+        },
+        Trap::Exception(Exception::LoadGuestPageFault) => {
+            panic!("LoadGuestPageFault: stval{:#x} sepc: {:#x}",
+                stval::read(),
+                ctx.guest_regs.sepc
+            );
+        },
         _ => {
             panic!(
                 "Unhandled trap: {:?}, sepc: {:#x}, stval: {:#x}",
                 scause.cause(),
                 ctx.guest_regs.sepc,
-                ctx.trap_csrs.stval
+                stval::read()
             );
         }
     }
+    false
 }
 
 fn prepare_guest_context(ctx: &mut VmCpuRegisters) {
