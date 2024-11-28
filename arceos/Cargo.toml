@@ -20,6 +20,7 @@ members = [
     "modules/axsync",
     "modules/axtask",
     "modules/bump_allocator",
+    "modules/riscv_vcpu",
 
     "api/axfeat",
     "api/arceos_api",
@@ -30,6 +31,7 @@ members = [
 
     "payload/origin",
     "payload/skernel",
+    "payload/skernel2",
 
     "tour/u_1_0",
     "tour/u_2_0",
@@ -45,11 +47,13 @@ members = [
     "tour/m_3_0",
     "tour/m_3_1",
     "tour/h_1_0",
+    "tour/h_2_0",
 
     "exercises/print_with_color",
     "exercises/support_hashmap",
     "exercises/alt_alloc",
     "exercises/sys_map",
+    "exercises/simple_hv",
 
     "examples/shell",
 ]

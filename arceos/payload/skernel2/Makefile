@@ -1,7 +1,7 @@
-TARGET := origin
+TARGET := skernel2
 TARGET_ELF := ../../target/riscv64gc-unknown-none-elf/release/$(TARGET)
 
-all: $(TARGET) FORCE
+all: clean $(TARGET) FORCE
 
 $(TARGET): $(TARGET_ELF)
 	@rust-objcopy --binary-architecture=riscv64 --strip-all -O binary $< $@

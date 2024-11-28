@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use defs::*;
 use tock_registers::interfaces::{Readable, Writeable};
 use tock_registers::RegisterLongName;
@@ -206,8 +204,8 @@ pub mod defs {
         gva OFFSET(6) NUMBITS(1) [],
         // Virtualization mode at time of trap.
         spv OFFSET(7) NUMBITS(1) [
-            Host = 0,
-            Guest = 1,
+            User = 0,
+            Supervisor = 1,
         ],
         // Privilege level the virtual hart was executing before entering HS-mode.
         spvp OFFSET(8) NUMBITS(1) [
