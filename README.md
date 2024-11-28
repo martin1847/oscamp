@@ -7,6 +7,8 @@ Experiments and course for oscamp.
 
 ```bash
 brew install dosfstools
+# sometimes
+export PATH=$PATH:/usr/local/Cellar/dosfstools/4.2/sbin 
 ```
 
 
