@@ -16,10 +16,9 @@ mod sbi;
 mod task;
 mod vcpu;
 
-use core::ptr::copy_nonoverlapping;
-
 use crate::regs::GprIndex::{A0, A1};
-use axhal::mem::PhysAddr;
+use axhal::mem::{MemoryAddr, PhysAddr, VirtAddr, PAGE_SIZE_4K};
+use axhal::paging::MappingFlags;
 use axmm::AddrSpace;
 use csrs::defs::hstatus;
 use csrs::{RiscvCsrTrait, CSR};
@@ -53,7 +52,7 @@ fn main() {
     prepare_vm_pgtable(ept_root);
 
     // Kick off vm and wait for it to exit.
-    while !run_guest(&mut ctx, &uspace) {}
+    while !run_guest(&mut ctx, &mut uspace) {}
 
     panic!("Hypervisor ok!");
 }
@@ -69,7 +68,7 @@ fn prepare_vm_pgtable(ept_root: PhysAddr) {
     }
 }
 
-fn run_guest(ctx: &mut VmCpuRegisters, uspace: &AddrSpace) -> bool {
+fn run_guest(ctx: &mut VmCpuRegisters, uspace: &mut AddrSpace) -> bool {
     unsafe {
         _run_guest(ctx);
     }
@@ -78,7 +77,7 @@ fn run_guest(ctx: &mut VmCpuRegisters, uspace: &AddrSpace) -> bool {
 }
 
 #[allow(unreachable_code)]
-fn vmexit_handler(ctx: &mut VmCpuRegisters, uspace: &AddrSpace) -> bool {
+fn vmexit_handler(ctx: &mut VmCpuRegisters, uspace: &mut AddrSpace) -> bool {
     use scause::{Exception, Trap};
 
     let scause = scause::read();
@@ -137,28 +136,42 @@ fn vmexit_handler(ctx: &mut VmCpuRegisters, uspace: &AddrSpace) -> bool {
         Trap::Exception(Exception::LoadGuestPageFault) => {
             // LoadGuestPageFault: stval0x40 sepc: 0x80200004
             // ld	a0,64(zero) # 40 <_percpu_load_end+0x40>
+            let user_fault_vaddr: VirtAddr = stval::read().into();
+
             warn!(
-                "LoadGuestPageFault: stval{:#x} sepc: {:#x}",
-                stval::read(),
-                ctx.guest_regs.sepc
+                "LoadGuestPageFault: stval{:?} sepc: {:#x}",
+                user_fault_vaddr, ctx.guest_regs.sepc
             );
 
-            let magic: usize = 0x6688;
-            let mut buf = [0u8; 8];
-            // unsafe {
-            //     copy_nonoverlapping(&magic as *const _ as *const u8, &mut buf as *mut [u8; 8] as *mut u8, 8);
-            // }
-            uspace.write(stval::read().into(), &buf);
             // let (paddr, _, _) = uspace
             //     .page_table()
             //     .query(stval::read().into())
             //     .unwrap_or_else(|_| panic!("Mapping failed for segment: {:#x}", stval::read()));
 
+            uspace.map_alloc(
+                user_fault_vaddr.align_down_4k(),
+                PAGE_SIZE_4K,
+                MappingFlags::READ | MappingFlags::WRITE | MappingFlags::USER,
+                true,
+            );
 
-            ctx.guest_regs.sepc += 4;
-            ctx.guest_regs.gprs.set_reg(A0, 0x6688);
+            let magic: usize = 0x6688;
+            // let mut buf = [0u8; 8];
+            let buf = unsafe {
+                alloc::slice::from_raw_parts(
+                    &magic as *const _ as *const u8,
+                    core::mem::size_of::<usize>(),
+                )
+            };
             info!(
-                "TODO ! ignore mmap addr 64, just next  and set a0=0x6688");
+                "mmap addr at {:?},  a0=0x6688 with buf  {:?}",
+                user_fault_vaddr, buf
+            );
+            uspace.write(user_fault_vaddr, buf);
+
+            // ctx.guest_regs.sepc += 4;
+            // ctx.guest_regs.gprs.set_reg(A0, 0x6688);
+            // info!("TODO ! ignore mmap addr 64, just next  and set a0=0x6688");
             return false;
         }
         _ => {

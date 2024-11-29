@@ -227,10 +227,19 @@ fn sys_mmap(
             addr_at, paddr, kernel_vaddr
         );
         // single page, write directly
+        // get_file_like(fd).a
         get_file_like(fd).and_then(|f| {
             f.read(unsafe { alloc::slice::from_raw_parts_mut(kernel_vaddr.as_mut_ptr(), len) })
         });
     }
+
+    // let disk_addr: VirtAddr = 0xffffffc040006000.into();
+    // let slice = unsafe { alloc::slice::from_raw_parts(disk_addr.as_ptr_of::<u16>(), 20) };
+
+    // warn!("found disk.img first 20 bytes {:?}", slice);
+    // for byte in slice {
+    //     warn!("{:x}", byte);
+    // }
 
     addr_at.as_usize() as isize
 }

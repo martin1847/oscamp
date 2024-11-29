@@ -6,5 +6,5 @@ use axstd::println;
 
 #[cfg_attr(feature = "axstd", no_mangle)]
 fn main() {
-    println!("Hello, Arceos!");
+    println!("Hello, Arceos!This is Hypervisor 1.0!!");
 }

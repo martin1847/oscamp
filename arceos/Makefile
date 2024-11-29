@@ -144,8 +144,8 @@ LD := rust-lld -flavor gnu
 
 OBJDUMP ?= rust-objdump -d --print-imm-hex --x86-asm-syntax=intel
 OBJCOPY ?= rust-objcopy --binary-architecture=$(ARCH)
-GDB ?= gdb-multiarch
-
+# GDB ?= gdb-multiarch
+GDB ?= lldb
 # Paths
 OUT_DIR ?= $(APP)
 
@@ -177,13 +177,16 @@ justrun:
 	$(call run_qemu)
 
 debug: build
-	$(call run_qemu_debug) &
-	sleep 1
-	$(GDB) $(OUT_ELF) \
-	  -ex 'target remote localhost:1234' \
-	  -ex 'b rust_entry' \
-	  -ex 'continue' \
-	  -ex 'disp /16i $$pc'
+  # @echo "$(GDB) $(OUT_ELF)  -o 'gdb-remote localhost:1234'  -o 'breakpoint set --name rust_entry'"
+# -o 'continue' \
+# -o 'display -f i -c 16 $pc'"
+	$(call run_qemu_debug) 
+# sleep 1
+# $(GDB) $(OUT_ELF) \
+#   -ex 'target remote localhost:1234' \
+#   -ex 'b rust_entry' \
+#   -ex 'continue' \
+#   -ex 'disp /16i $$pc'
 
 clippy:
 ifeq ($(origin ARCH), command line)
