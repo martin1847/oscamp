@@ -60,15 +60,26 @@ fn main() {
                     assert_eq!(addr, 0x2200_0000.into(), "Now we ONLY handle pflash#2.");
                     let mapping_flags = MappingFlags::from_bits(0xf).unwrap();
                     // Passthrough-Mode
-                    let _ = aspace.map_linear(addr, addr.as_usize().into(), 4096, mapping_flags);
+                    // let _ = aspace.map_linear(addr, addr.as_usize().into(), 4096, mapping_flags);
 
-                    /*
+                    // direct
+                    // Try to access dev region [0xFFFFFFC022000000], got 0x646C6670
+                    // Got pflash magic: pfld
+
+                    /**/
                     // Emulator-Mode
                     // Pretend to load file to fill buffer.
-                    let buf = "pfld";
+                    let mut pflash = File::open("/sbin/pflash.img").expect("/sbin/pflash.img not found!!");
+                    // let buf = "pfld";
+                    let mut bytes:[u8;4096]= [0;4096];
+                    // use axio::Read;
+                    use std::io::Read;
+                    pflash.read(&mut bytes);
+                    // pflash
                     aspace.map_alloc(addr, 4096, mapping_flags, true);
-                    aspace.write(addr, buf.as_bytes());
-                    */
+                    aspace.write(addr, &bytes);
+                    // aspace.write(addr, buf.as_bytes());
+                    
                 },
                 _ => {
                     panic!("Unhandled VM-Exit: {:?}", exit_reason);
