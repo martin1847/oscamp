@@ -2,14 +2,25 @@
 
 本实验指导是为Unikernel内核模式下支持Linux多应用所做的前期准备。包括一系列基本实验与附加练习：
 
-1. 基本实验：本指导书以增量的方式基本给出了1到5共5个实验的源码及过程，大家照着做一遍，以熟悉基本原理机制。
-2. 附加练习：基于基本实验，根据自己的理解，增加一些实现，以达到练习要求目标。总共6个练习。
+1. 基本实验：本指导书以增量的方式基本给出了1到4共4个实验的源码及过程，大家照着做一遍，以熟悉基本原理机制。
+2. 附加练习：基于基本实验，根据自己的理解，增加一些实现，以达到练习要求目标。总共5个练习。
+
+
+
+### 特别说明
+
+在Unikernel模式下支持Linux应用，与扩展为宏内核模式后，再支持Linux应用既有联系，又存在显著的区别。主要体现在：
+
+1. Unikernel模式下只有内核态，没有特权级切换。从安全角度来看，削弱了内核与应用之间，应用与应用之间的隔离与保护；但是也使得在实现上用函数调用代替系统调用成为了可能，这可以显著提高操作效率。
+2. Unikernel模式下，内核与应用位于同一地址空间内，对应于应用区域的页表项不再需要、也不应该再有User标志控制，当我们复用ArceOS的axmm等组件时，需要注意地址空间操作上的差异。
+
+本指导书中的实验都是最原始、低级的实验。除了axstd之外没有引用其它组件，也没有启用"paging"等额外的features。希望大家在理解基本原理的同时，从最基础的层面重新思考在Unikernel模式下如何直接支持Linux应用，如何充分利用效率上的优势，同时又能尽量提升安全性。希望把Unikernel支持Linux应用作为一个单独的组件化扩展方向去考虑，而不是仅仅作为宏内核的缩略版。组件的复用性应该源于对各种模式下共性的自然提取，而非简单的相互迁就。
 
 
 
 ### 环境准备
 
-注意：以下实验都是基于**ArceOS的主线仓库**，**不是**基于oscamp那个简化的版本仓库。
+注意：以下实验都是基于**ArceOS的主线仓库**，**不是**基于oscamp那个简化的仓库。
 
 1. Fork ArceOS的工程，clone到本地。工程链接如下
 
@@ -17,23 +28,23 @@
    git@github.com:arceos-org/arceos.git
    ```
 
-   通过`git log`查看commit id是否为*51a42ea4d65a53bf6b43fc35a27a3ff1e9e284c7*。如果不是，回退到这个commit，确保工作的基线与指导书一致。
+   通过`git log`查看commit id是否为*82d9a05b3b404d*。如果不是，回退到这个commit，确保工作的基线与指导书一致。
 
-2. 建立并切换到分支week2_base
+2. 建立并切换到分支linux_apps_base
 
    ```sh
    cd arceos
    git checkout main
-   git checkout -b week2_base
+   git checkout -b linux_apps_base
    ```
 
    这个分支对应**基本实验**。开始实验时，每完成一个，就commit 一次，commit msg是"step N"，N是实验序号。
 
-3. 建立并切换到分支week2_exercise
+3. 建立并切换到分支linux_apps_exercise
 
    ```rust
    git checkout main
-   git checkout -b week2_exercise
+   git checkout -b linux_apps_exercise
    ```
 
    这个分支对应**附加练习**。根据每个附加练习的要求完成，每完成一个commit一次，commit msg是"exercise N"，N是练习序号。
@@ -62,6 +73,10 @@
 
    看到这个输出表示环境正常。
 
+   
+   
+   > 注意：重现基本基本在linux_apps_base分支，做附加练习在linux_apps_exercise分支。避免混淆。
+   
    
 
 ### 实验1：从外部加载应用
@@ -106,7 +121,7 @@
 
    定制默认的toolchain，关键是指定target = "riscv64gc-unknown-none-elf"。即riscv64体系结构的裸机程序。
 
-3. 执行一系列命名，包括编译，转换和打包，生成可被ArceOS加载的image。
+3. 在hello_app目录下，执行一系列命名，包括编译，转换和打包，生成可被ArceOS加载的image。
 
    ```sh
    cargo build --target riscv64gc-unknown-none-elf --release
@@ -124,7 +139,7 @@
 
    > 这步的一系列动作可以考虑写入一个shell脚本，便于今后执行。
 
-4. 转移到ArceOS工程，在apps目录下，实现一个新的app，名为loader。仿照helloworld应用创建，它的main.rs如下
+4. 回到ArceOS工程，在examples/目录下，实现一个新的app，名为loader。仿照helloworld应用创建，它的main.rs如下
 
    ```rust
    #![cfg_attr(feature = "axstd", no_std)]
@@ -133,7 +148,7 @@
    #[cfg(feature = "axstd")]
    use axstd::println;
    
-   const PLASH_START: usize = 0x22000000;
+   const PLASH_START: usize = 0xffff_ffc0_2200_0000;
    
    #[cfg_attr(feature = "axstd", no_mangle)]
    fn main() {
@@ -149,27 +164,16 @@
    }
    ```
 
-   注意：qemu有两个pflash，其中第一个被保留做扩展的bios，我们只能用第二个，它的开始地址0x22000000。
+   > 注意：qemu有两个pflash，其中第一个被保留做扩展的bios，我们只能用第二个，它的开始地址0x22000000。
 
-5. ArceOS目前没有对pflash所在的地址空间进行映射，增加映射。
-
-   在文件modules/axhal/src/platform/riscv64_qemu_virt/boot.rs中，恒等映射从0开始的1G空间。
+   loader的Cargo.toml中需要包含对axstd的依赖，如下：
 
    ```rust
-   unsafe fn init_boot_page_table() {
-       // 0x8000_0000..0xc000_0000, VRWX_GAD, 1G block
-       BOOT_PT_SV39[2] = (0x80000 << 10) | 0xef;
-       // 0xffff_ffc0_8000_0000..0xffff_ffc0_c000_0000, VRWX_GAD, 1G block
-       BOOT_PT_SV39[0x102] = (0x80000 << 10) | 0xef;
-   
-       // 0x0000_0000..0x4000_0000, VRWX_GAD, 1G block
-       BOOT_PT_SV39[0] = (0x00000 << 10) | 0xef;
-   }
+   [dependencies]
+   axstd = { workspace = true, optional = true }
    ```
 
-   注意，只有最后两行是我们新增的映射。这样ArceOS就可以访问pflash所在的地址空间。
-
-6. 现在可以编译ArceOS了，修改一下Makefile的默认参数。看一下修改前后diff的结果
+5. 在编译ArceOS之前，修改一下Makefile的默认参数，以方便后面的实验。看一下修改前后diff的结果
 
    ```makefile
     # General options
@@ -177,21 +181,27 @@
    +ARCH ?= riscv64
    
     # App options
-   -A ?= apps/helloworld
-   +A ?= apps/loader
+   -A ?= examples/helloworld
+   +A ?= examples/loader
    ```
 
-   默认arch改为riscv64，默认应用改为apps/loader即我们的加载器。
+   默认arch改为riscv64，默认应用改为examples/loader即我们的加载器。
 
-7. 修改一下qemu的启动参数，让pflash加载之前的image就是那个apps.bin，然后启动ArceOS内核及loader应用。
+6. 修改一下qemu的启动参数，让pflash能够被启用，并通过它加载apps.bin。
 
-   修改scripts/make/qemu.mk，在qemu启动参数中追加
+   修改scripts/make/qemu.mk，在qemu启动参数中追加pflash的相关参数，修改前后差异：
 
    ``` makefile
-   -drive if=pflash,file=$(CURDIR)/payload/apps.bin,format=raw,unit=1
+    qemu_args-riscv64 := \
+      -machine virt \
+      -bios default \
+   +  -drive if=pflash,file=$(CURDIR)/payload/apps.bin,format=raw,unit=1 \
+      -kernel $(OUT_BIN)
    ```
 
-8. 把apps/loader加到根目录Cargo.toml中的[workspace]下的members列表中。执行`make run`测试
+   增加了pflash的参数行，其中指定了后备文件是apps.bin。
+
+7. 把examples/loader加到根目录Cargo.toml中的[workspace]下的members列表中。执行`make run`测试
 
    ```sh
    arch = riscv64
@@ -209,9 +219,9 @@
    注意前6个字节，转为十六级制就是测试应用hello_app.bin的内容，可以用如下命令确认
 
    ```rust
-   xxd -l ./hello_app.bin
+   xxd -l 6 ./payload/apps.bin
    ```
-   
+
    对比后可发现内容一致。应用打印的是十进制，xxd显示的十六进展，注意进制和大小端问题。
 
 
@@ -242,7 +252,11 @@ main函数中，固定设置app_size = 32，这个显然是不合理甚至危险
 
 <img src=".\pictures\p2.png" style="zoom:50%;" />
 
-1. 从pflash区域拷贝到0x8010_0000，即Kernel前面1M处作为应用的执行区，改造一下loader 的main.rs(这里只给出增量代码)
+1. 从pflash区域拷贝到0x8010_0000，即Kernel前面1M处作为应用的执行区。
+
+   注意：由于恒等映射的关系，目前采用0x8010_0000或者0xffff_ffc0_8010_0000的结果都是一样的，大家可以试验一下。
+
+   改造一下loader 的main.rs(这里只给出增量代码，即main函数实现本身被更新)
 
    ```rust
    #[cfg_attr(feature = "axstd", no_mangle)]
@@ -257,7 +271,7 @@ main函数中，固定设置app_size = 32，这个显然是不合理甚至危险
    
        // app running aspace
        // SBI(0x80000000) -> App <- Kernel(0x80200000)
-       // 0xffff_ffc0_0000_0000
+       // va_pa_offset: 0xffff_ffc0_0000_0000
        const RUN_START: usize = 0xffff_ffc0_8010_0000;
    
        let run_code = unsafe {
@@ -281,7 +295,7 @@ main函数中，固定设置app_size = 32，这个显然是不合理甚至危险
    log_level = warn
    
    Load payload ...
-   load code [115, 0, 80, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; address [0x22000000]
+   load code [115, 0, 80, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; address [0xffffffc022000000]
    run code [115, 0, 80, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; address [0xffffffc080100000]
    Load payload ok!
    ```
@@ -302,7 +316,7 @@ main函数中，固定设置app_size = 32，这个显然是不合理甚至危险
        )}
    ```
 
-   `make run`显示"Execute app ..."之后卡住了，但这是正常的，注意汇编最后一句是无限循环。
+   `make run`显示"Execute app ..."之后**卡住了**，但这是**正常**的，注意`wfi`的作用是等待。
 
    > 如果提示需要#![feature(asm_const)]之类的支持，按照提示处理。
    >
@@ -315,11 +329,11 @@ main函数中，固定设置app_size = 32，这个显然是不合理甚至危险
    +QEMU_LOG ?= y
    ```
 
-   再次`make run`，当前目录下产生qemu.log
+   再次`make run`，当前目录下产生qemu.log，注意日志文件末尾
 
    ```asm
+   ----------------
    IN:
-   Priv: 1; Virt: 0
    0xffffffc080100000:  10500073          wfi
    0xffffffc080100004:  0000              illegal
    ```
@@ -328,13 +342,13 @@ main函数中，固定设置app_size = 32，这个显然是不合理甚至危险
 
 #### 练习3
 
-批处理方式执行两个单行代码应用，第一个应用的单行代码是`noop`，第二个的是`wfi`.
+批处理方式执行两个单行代码应用，第一个应用的单行代码是`nop`，第二个的是`wfi`.
 
 
 
 ### 实验3：通过ABI调用ArceOS功能
 
-到目前为止，我们的外部应用hello_app还无法做实际的事情。原因就是，这个应用是独立于ArceOS之外编译的单独Image，现在ArceOS还没有为它提供调用接口。本实验中，我们先来做一个准备，为ArceOS增加简单的ABI接口支持，首先让内嵌应用Loader能够通过ABI方式调用功能；下个实验我们再进一步改成让外部应用通过ABI调用功能。
+到目前为止，我们的外部应用hello_app还无法做实际的事情。原因就是，这个应用是独立于ArceOS之外编译的单独Image，现在ArceOS还没有为它提供调用接口。本实验中，我们先来做一个准备，为ArceOS增加简单的ABI接口支持，首先让内嵌应用Loader能够通过ABI方式调用功能；等到下一个实验即实验4时，我们再进一步改成让外部应用直接调用ABI功能。
 
 <img src=".\pictures\p3.png" alt="图片3" style="zoom:50%;" />
 
@@ -400,10 +414,10 @@ main函数中，固定设置app_size = 32，这个显然是不合理甚至危险
    log_level = warn
    
    Load payload ...
-   load code [[115, 0, 80, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]; address [0x22000000]
-   run code [[115, 0, 80, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]; address [0xffffffc080100000]
+   load code [115, 0, 80, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; address [0xffffffc022000000]
+   run code [115, 0, 80, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; address [0xffffffc080100000]
    Load payload ok!
-   
+   Execute app ...
    Execute app ...
    [ABI:Print] A
    QEMU: Terminated
@@ -411,7 +425,9 @@ main函数中，固定设置app_size = 32，这个显然是不合理甚至危险
 
    看到打印出字符'A'，测试成功！
 
-   打印后卡住了，还是用Ctrl+a后x退出。下面练习4就实验一下退出功能。
+   打印后卡住了，还是用Ctrl+a后x退出。在随后的练习中，大家实验一下，如何实现退出功能。
+   
+   > 可以尝试abi_num设置成SYS_HELLO的情况。
 
 
 #### 练习4
@@ -509,150 +525,3 @@ main函数中，固定设置app_size = 32，这个显然是不合理甚至危险
 > 别忘了应用修改后，还要执行实验1的第3步完成编译转换和覆盖旧应用。如果当时封装了shell脚本，这步比较方便。
 
 
-
-### 实验5：支持内核和应用分离的地址空间及切换
-
-目前，ArceOS Unikernel是单地址空间。我们希望为每个外部应用建立独立的地址空间，当应用被调度时，切换到此应用的地址空间上。这样对每个应用，就可以采用固定的地址空间布局。现在从0x4000_0000地址开始的1G区域空闲，那我们就以它作为应用的地址空间。
-
-<img src=".\pictures\p5.png" alt="图片5" style="zoom:50%;" />
-
-1. 在应用loader中，为应用hello_app建立独立的页表(仅有一级)，并实现初始化和切换函数。main.rs最后追加如下：
-
-   ```rust
-   //
-   // App aspace
-   //
-   
-   #[link_section = ".data.app_page_table"]
-   static mut APP_PT_SV39: [u64; 512] = [0; 512];
-   
-   unsafe fn init_app_page_table() {
-       // 0x8000_0000..0xc000_0000, VRWX_GAD, 1G block
-       APP_PT_SV39[2] = (0x80000 << 10) | 0xef;
-       // 0xffff_ffc0_8000_0000..0xffff_ffc0_c000_0000, VRWX_GAD, 1G block
-       APP_PT_SV39[0x102] = (0x80000 << 10) | 0xef;
-   
-       // 0x0000_0000..0x4000_0000, VRWX_GAD, 1G block
-       APP_PT_SV39[0] = (0x00000 << 10) | 0xef;
-   
-       // For App aspace!
-       // 0x4000_0000..0x8000_0000, VRWX_GAD, 1G block
-       APP_PT_SV39[1] = (0x80000 << 10) | 0xef;
-   }
-   
-   unsafe fn switch_app_aspace() {
-       use riscv::register::satp;
-       let page_table_root = APP_PT_SV39.as_ptr() as usize - axconfig::PHYS_VIRT_OFFSET;
-       satp::set(satp::Mode::Sv39, 0, page_table_root >> 12);
-       riscv::asm::sfence_vma_all();
-   }
-   ```
-
-   APP_PT_SV39的链接位置".data.app_page_table"，定义在modules/axhal/linker.lds.S中：
-
-   ```rust
-            _sdata = .;
-            *(.data.boot_page_table)
-            . = ALIGN(4K);
-            *(.data.app_page_table)
-            . = ALIGN(4K);
-            *(.data .data.*)
-   ```
-
-   就紧跟在系统页表位置*(.data.boot_page_table)的下面。**注意**，咱们增加的只有中间两行。
-
-   此外，代码中引用了两个外部的crate，是axconfig和riscv，修改loader的Cargo.toml
-
-   ```rust
-   [dependencies]
-   axstd = { path = "../../ulib/axstd", optional = true }
-   axconfig = { path = "../../modules/axconfig" }
-   
-   [target.'cfg(any(target_arch = "riscv32", target_arch = "riscv64"))'.dependencies]
-   riscv = "0.10"
-   ```
-
-2. 虽然已经建立了应用的页表，但我们先不切换，直接去访问应用的地址空间0x4010_0000，去看看这将会导致什么样的状况。
-
-   在loader的main函数中修改如下：
-
-   ```diff
-       - const RUN_START: usize = 0xffff_ffc0_8010_0000;
-       + const RUN_START: usize = 0x4010_0000;
-   ```
-
-   > 注意：这个0x4010_0000所在的1G空间在原始的内核地址空间中是不存在的
-
-   执行`make run`，系统异常**STORE_FAULT**，因为没有启用应用的地址空间映射。
-
-   ```rust
-   Unhandled trap Exception(StorePageFault) @ 0xffffffc080202aa8:
-   TrapFrame {
-       regs: GeneralRegisters {
-           ra: 0xffffffc0802005f4,
-           sp: 0xffffffc080247d30,
-           gp: 0x0,
-           tp: 0x0,
-           t0: 0x20,
-           t1: 0xffffffc080202b38,
-           t2: 0x40100000,
-           s0: 0xffffffc0802001aa,
-           s1: 0xffffffc080200488,
-           a0: 0x40100000,
-           a1: 0x22000000,
-           a2: 0x28e428904300513,
-           a3: 0x40100020,
-           a4: 0x2,
-           a5: 0xffffffc0802018be,
-           a6: 0x20,
-           a7: 0x22000000,
-           s2: 0x1,
-           s3: 0xffffffc080247db0,
-           s4: 0xffffffc080247d48,
-           s5: 0x3,
-           s6: 0xffffffc080247d58,
-           s7: 0x2,
-           s8: 0x40100000,
-           s9: 0x20,
-           s10: 0x0,
-           s11: 0x0,
-           t3: 0x10,
-           t4: 0xffffffc080203fe0,
-           t5: 0x27,
-           t6: 0x1,
-       },
-       sepc: 0xffffffc080202aa8,
-       sstatus: 0x8000000200006100,
-   }
-   ```
-
-3. 现在正式切换地址空间。在拷贝Image到0x4010_0000的地址之前，切换到应用的地址空间。
-
-   即在`const RUN_START: usize = 0x4010_0000;`代码行之前，先调用下面的两行：
-
-   ```rust
-       // switch aspace from kernel to app
-       unsafe { init_app_page_table(); }
-       unsafe { switch_app_aspace(); }
-   ```
-
-4. 执行`make run`
-
-   ```rust
-   Load payload ...
-   load code [19, 5, 48, 4, 137, 66, 142, 2, 51, 131, 88, 0, 3, 51, 3, 0, 2, 147, 115, 0, 80, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; address [0x22000000]
-   run code [19, 5, 48, 4, 137, 66, 142, 2, 51, 131, 88, 0, 3, 51, 3, 0, 2, 147, 115, 0, 80, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; address [0x40100000]
-   Load payload ok!
-   Execute app ...
-   [ABI:Print] C
-   ```
-
-   又能看到打印字符了，切换地址空间成功！
-
-
-#### 练习6
-
-1. 仿照hello_app再实现一个应用，唯一功能是打印字符'D'。
-
-2. 现在有两个应用，让它们分别有自己的地址空间。
-3. 让loader顺序加载、执行这两个应用。这里有个问题，第一个应用打印后，不能进行无限循环之类的阻塞，想办法让控制权回到loader，再由loader执行下一个应用。
