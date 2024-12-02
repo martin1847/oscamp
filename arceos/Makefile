@@ -223,7 +223,7 @@ endif
 
 pflash_img:
 	@rm -f $(PFLASH_IMG)
-	$(call mk_pflash_mac,$(PFLASH_IMG))
+	$(call mk_pflash,$(PFLASH_IMG))
 
 payload:
 	@make -C ./payload
