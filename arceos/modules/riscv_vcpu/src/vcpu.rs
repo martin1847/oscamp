@@ -261,9 +261,8 @@ impl RISCVVCpu {
         sstatus.set_spp(sstatus::SPP::Supervisor);
         regs.guest_regs.sstatus = sstatus.bits();
 
-        //regs.guest_regs.gprs.set_reg(GprIndex::A0, 0);
-        //regs.guest_regs.gprs.set_reg(GprIndex::A1, 0x9000_0000);
-
+        CSR.sie
+            .read_and_clear_bits(traps::interrupt::SUPERVISOR_TIMER);
         Self { regs }
     }
 
@@ -316,6 +315,7 @@ impl RISCVVCpu {
                             sbi_rt::legacy::console_putchar(c);
                         }
                         SbiMessage::SetTimer(timer) => {
+                            info!("Set timer... ");
                             sbi_rt::set_timer(timer as u64);
                             // Clear guest timer interrupt
                             CSR.hvip
@@ -342,7 +342,7 @@ impl RISCVVCpu {
                 }
             }
             Trap::Interrupt(Interrupt::SupervisorTimer) => {
-                debug!("timer irq emulation");
+                info!("timer irq emulation");
                 // Enable guest timer interrupt
                 CSR.hvip
                     .read_and_set_bits(traps::interrupt::VIRTUAL_SUPERVISOR_TIMER);
