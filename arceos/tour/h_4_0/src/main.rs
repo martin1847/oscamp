@@ -8,17 +8,18 @@ extern crate log;
 #[macro_use]
 extern crate alloc;
 extern crate axstd as std;
-use alloc::string::ToString;
-use riscv_vcpu::AxVCpuExitReason;
-use axerrno::{ax_err_type, AxResult};
-use memory_addr::VirtAddr;
 use alloc::string::String;
-use std::fs::File;
-use riscv_vcpu::RISCVVCpu;
+use alloc::string::ToString;
+use axerrno::{ax_err_type, AxResult};
+use memory_addr::MemoryAddr;
+use memory_addr::VirtAddr;
+use riscv_vcpu::AxVCpuExitReason;
 use riscv_vcpu::AxVCpuExitReason::NestedPageFault;
+use riscv_vcpu::RISCVVCpu;
+use std::fs::File;
 
-use axmm::AddrSpace;
 use axhal::paging::MappingFlags;
+use axmm::AddrSpace;
 use vmdev::VmDevGroup;
 
 const VM_ASPACE_BASE: usize = 0x0;
@@ -39,39 +40,59 @@ fn main() {
 
     // Physical memory region. Full access flags.
     let mapping_flags = MappingFlags::from_bits(0xf).unwrap();
-    aspace.map_alloc(PHY_MEM_START.into(), PHY_MEM_SIZE, mapping_flags, true).unwrap();
+    aspace
+        .map_alloc(PHY_MEM_START.into(), PHY_MEM_SIZE, mapping_flags, true)
+        .unwrap();
 
     // Load corresponding images for VM.
     info!("VM created success, loading images...");
     let image_fname = "/sbin/m_1_1_riscv64-qemu-virt.bin";
-    load_vm_image(image_fname.to_string(), KERNEL_BASE.into(), &aspace).expect("Failed to load VM images");
+    load_vm_image(image_fname.to_string(), KERNEL_BASE.into(), &aspace)
+        .expect("Failed to load VM images");
 
     // Register pflash device into vm.
     let mut vmdevs = VmDevGroup::new();
     vmdevs.add_dev(0x2200_0000.into(), 0x200_0000);
+    // vmdevs.add_dev(0x3000_0000.into(), 0x1000_0000);
+    // vmdevs.add_dev(0x4000_0000.into(), 0x1000_0000);
+
+    // aspace
+    //     .map_alloc(0x3000_0000.into(), 0x1000_0000, mapping_flags, true)
+    //     .unwrap();
 
     // Create VCpus.
     let mut arch_vcpu = RISCVVCpu::init();
 
     // Setup VCpus.
-    info!("bsp_entry: {:#x}; ept: {:#x}", KERNEL_BASE, aspace.page_table_root());
+    info!(
+        "bsp_entry: {:#x}; ept: {:#x}",
+        KERNEL_BASE,
+        aspace.page_table_root()
+    );
     arch_vcpu.set_entry(KERNEL_BASE.into()).unwrap();
     arch_vcpu.set_ept_root(aspace.page_table_root()).unwrap();
 
     loop {
         match vcpu_run(&mut arch_vcpu) {
             Ok(exit_reason) => match exit_reason {
-                AxVCpuExitReason::Nothing => {},
-                NestedPageFault{addr, access_flags} => {
-                    debug!("addr {:#x} access {:#x}", addr, access_flags);
+                AxVCpuExitReason::Nothing => {}
+                NestedPageFault { addr, access_flags } => {
+                    if addr > 0x4000_0000.into() {
+                        info!(
+                            "GUEST addr {:#x} -> align: {:x} access {:#x}",
+                            addr,
+                            addr.align_down_4k(),
+                            access_flags
+                        );
+                    }
                     if addr < PHY_MEM_START.into() {
                         // Find dev and handle mmio region.
                         let dev = vmdevs.find_dev(addr).expect("No dev.");
-                        dev.handle_mmio(addr, &mut aspace).unwrap();
+                        dev.handle_mmio(addr.align_down_4k(), &mut aspace).unwrap();
                     } else {
                         unimplemented!("Handle #PF for memory region.");
                     }
-                },
+                }
                 _ => {
                     panic!("Unhandled VM-Exit: {:?}", exit_reason);
                 }
@@ -105,7 +126,7 @@ fn load_vm_image(image_path: String, image_load_gpa: VirtAddr, aspace: &AddrSpac
 }
 
 fn vcpu_run(arch_vcpu: &mut RISCVVCpu) -> AxResult<AxVCpuExitReason> {
-    use axhal::arch::{local_irq_save_and_disable, local_irq_restore};
+    use axhal::arch::{local_irq_restore, local_irq_save_and_disable};
     let flags = local_irq_save_and_disable();
     let ret = arch_vcpu.run();
     local_irq_restore(flags);
